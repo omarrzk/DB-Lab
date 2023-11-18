@@ -1,0 +1,191 @@
+-- Skapa Författare-tabellen
+CREATE TABLE Författare (
+    ID INT IDENTITY PRIMARY KEY,
+    Förnamn VARCHAR(50),
+    Efternamn VARCHAR(50),
+    Födelsedatum DATE
+);
+
+-- Skapa Böcker-tabellen
+CREATE TABLE Böcker (
+    ISBN13 VARCHAR(13) PRIMARY KEY,
+    Titel VARCHAR(100),
+    Språk VARCHAR(50),
+    Pris DECIMAL(10, 2),
+    Utgivningsdatum DATE,
+    FörfattareID INT,
+    FOREIGN KEY (FörfattareID) REFERENCES Författare(ID)
+);
+
+-- Skapa Butiker-tabellen
+CREATE TABLE Butiker (
+    ID INT IDENTITY PRIMARY KEY,
+    Butiksnamn VARCHAR(100),
+    Adress VARCHAR(100)
+);
+
+-- Uppdaterad LagerSaldo-tabellen
+CREATE TABLE LagerSaldo (
+    ButikID INT,
+    ISBN VARCHAR(13),
+    Antal INT,
+    Inköpsdatum DATE,
+    Utgångsdatum DATE,
+    PRIMARY KEY (ButikID, ISBN),
+    FOREIGN KEY (ButikID) REFERENCES Butiker(ID),
+    FOREIGN KEY (ISBN) REFERENCES Böcker(ISBN13)
+);
+
+-- Skapa Kundtabellen
+CREATE TABLE Kunder (
+    ID INT IDENTITY PRIMARY KEY,
+    Förnamn VARCHAR(50),
+    Efternamn VARCHAR(50),
+    Email VARCHAR(100),
+    Telefon VARCHAR(20)
+);
+
+-- Skapa Ordertabellen
+CREATE TABLE Ordrar (
+    ID INT IDENTITY PRIMARY KEY,
+    KundID INT,
+    OrderDatum DATE,
+    FOREIGN KEY (KundID) REFERENCES Kunder(ID)
+);
+
+-- Skapa Förlagtabellen
+CREATE TABLE Förlag (
+    ID INT IDENTITY PRIMARY KEY,
+    Förlagsnamn VARCHAR(100),
+    Adress VARCHAR(100),
+    Telefon VARCHAR(20)
+);
+
+-- Skapa kopplingstabell för många-till-många-relation mellan Böcker och Författare
+CREATE TABLE BokFörfattare (
+    BokISBN VARCHAR(13),
+    FörfattareID INT,
+    PRIMARY KEY (BokISBN, FörfattareID),
+    FOREIGN KEY (BokISBN) REFERENCES Böcker(ISBN13),
+    FOREIGN KEY (FörfattareID) REFERENCES Författare(ID)
+);
+
+-- Skapa vy v_TitlarPerFörfattare
+CREATE VIEW v_TitlarPerFörfattare AS
+SELECT 
+    CONCAT(F.Förnamn, ' ', F.Efternamn) AS Namn,
+    DATEDIFF(YEAR, F.Födelsedatum, GETDATE()) AS Ålder,
+    COUNT(DISTINCT B.Titel) AS Titlar,
+    SUM(B.Pris * LS.Antal) AS Lagervärde
+FROM Författare F
+JOIN BokFörfattare BF ON F.ID = BF.FörfattareID
+JOIN Böcker B ON BF.BokISBN = B.ISBN13
+JOIN LagerSaldo LS ON B.ISBN13 = LS.ISBN
+GROUP BY F.ID, F.Förnamn, F.Efternamn, F.Födelsedatum;
+
+-- Skapa lagrad procedur usp_FlyttaBok
+CREATE PROCEDURE usp_FlyttaBok
+  @FrånButikID INT,
+  @TillButikID INT,
+  @ISBN VARCHAR(13),
+  @Antal INT = 1
+AS
+BEGIN
+  IF @Antal > (SELECT Antal FROM LagerSaldo WHERE ButikID = @FrånButikID AND ISBN = @ISBN)
+  BEGIN
+    RAISEERROR ('Det finns inte tillräckligt med böcker i den ursprungliga butiken.', 16, 1);
+    RETURN;
+  END;
+
+  UPDATE LagerSaldo
+  SET Antal = Antal - @Antal
+  WHERE ButikID = @FrånButikID AND ISBN = @ISBN;
+
+  UPDATE LagerSaldo
+  SET Antal = Antal + @Antal
+  WHERE ButikID = @TillButikID AND ISBN = @ISBN;
+
+  COMMIT;
+END;
+
+-- Infoga demodata
+INSERT INTO Författare (Förnamn, Efternamn, Födelsedatum)
+VALUES ('John', 'Doe', '1980-01-01'),
+       ('Jane', 'Smith', '1990-05-15'),
+       ('Michael', 'Johnson', '1975-09-30'),
+       ('Emily', 'Brown', '1988-12-10');
+
+INSERT INTO Böcker (ISBN13, Titel, Språk, Pris, Utgivningsdatum, FörfattareID)
+VALUES ('9781234567890', 'Bok 1', 'Svenska', 19.99, '2022-01-01', 1),
+       ('9782345678901', 'Bok 2', 'Svenska', 14.99, '2022-02-01', 2),
+       ('9783456789012', 'Bok 3', 'Svenska', 9.99, '2022-03-01', 3),
+       ('9784567890123', 'Bok 4', 'Svenska', 24.99, '2022-04-01', 4);
+
+-- Infoga demodata i Butiker-tabellen
+INSERT INTO Butiker (Butiksnamn, Adress)
+VALUES ('Butik 1', '123 Huvudgatan'),
+       ('Butik 2', '456 Elm-gatan'),
+       ('Butik 3', '789 Ekgatan');
+
+-- Infoga demodata i LagerSaldo-tabellen
+INSERT INTO LagerSaldo (ButikID, ISBN, Antal, Inköpsdatum, Utgångsdatum)
+VALUES
+    (1, '9781234567890', 10, '2023-01-01', NULL), -- Inköpt 2023-01-01, inget utgångsdatum än
+    (1, '9782345678901', 5, '2023-02-01', '2023-12-31'), -- Inköpt 2023-02-01, utgår 2023-12-31
+    (2, '9783456789012', 8, '2023-03-01', NULL),
+    (2, '9784567890123', 12, '2023-04-01', NULL),
+    (3, '9781234567890', 15, '2023-05-01', NULL),
+    (3, '9782345678901', 3, '2023-06-01', NULL),
+    (3, '9783456789012', 6, '2023-07-01', NULL),
+    (3, '9784567890123', 9, '2023-08-01', NULL);
+
+-- Infoga demodata för Kunder-tabellen
+INSERT INTO Kunder (Förnamn, Efternamn, Email, Telefon)
+VALUES
+    ('Kalle', 'Anka', 'kalle.anka@email.com', '123456789'),
+    ('Mimmi', 'Pigg', 'mimmi.pigg@email.com', '987654321');
+
+-- Infoga demodata för Ordrar-tabellen
+INSERT INTO Ordrar (KundID, OrderDatum)
+VALUES
+    (1, '2023-11-18'),
+    (2, '2023-11-18');
+
+-- Infoga demodata för Förlag-tabellen
+INSERT INTO Förlag (Förlagsnamn, Adress, Telefon)
+VALUES
+    ('Förlag 1', '123 Adressgatan', '123-456789'),
+    ('Förlag 2', '456 Adressgatan', '456-789012');
+
+-- Infoga demodata i BokFörfattare-tabellen
+INSERT INTO BokFörfattare (BokISBN, FörfattareID)
+VALUES ('9781234567890', 1),
+       ('9782345678901', 2),
+       ('9783456789012', 3),
+       ('9784567890123', 4);
+
+-- Ytterligare vyexempel
+CREATE VIEW v_BokFörsäljningPerButik AS
+SELECT
+    S.Butiksnamn,
+    B.Titel,
+    SUM(B.Pris * LS.Antal) AS TotalFörsäljning
+FROM Butiker S
+JOIN LagerSaldo LS ON S.ID = LS.ButikID
+JOIN Böcker B ON LS.ISBN = B.ISBN13
+GROUP BY S.Butiksnamn, B.Titel;
+
+-- Ytterligare frågor för testning
+SELECT * FROM Författare;
+SELECT * FROM Böcker;
+SELECT * FROM Butiker;
+SELECT * FROM LagerSaldo;
+SELECT * FROM Kunder;
+SELECT * FROM Ordrar;
+SELECT * FROM Förlag;
+SELECT * FROM BokFörfattare;
+SELECT * FROM v_TitlarPerFörfattare;
+SELECT * FROM v_BokFörsäljningPerButik;
+
+-- Exekvera stored procedure usp_FlyttaBok
+EXEC usp_FlyttaBok @FrånButikID = 1, @TillButikID = 2, @ISBN = '9781234567890', @Antal = 3;
