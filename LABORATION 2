@@ -3,7 +3,7 @@ CREATE TABLE Författare (
     ID INT IDENTITY PRIMARY KEY,
     Förnamn VARCHAR(50),
     Efternamn VARCHAR(50),
-    Födelsedatum DATE
+    Födelsedatum DATE -- Författarens födelsedatum
 );
 
 -- Skapa Böcker-tabellen
@@ -13,7 +13,7 @@ CREATE TABLE Böcker (
     Språk VARCHAR(50),
     Pris DECIMAL(10, 2),
     Utgivningsdatum DATE,
-    FörfattareID INT,
+    FörfattareID INT, -- Koppling till Författare-tabellen
     FOREIGN KEY (FörfattareID) REFERENCES Författare(ID)
 );
 
@@ -70,12 +70,12 @@ CREATE TABLE BokFörfattare (
     FOREIGN KEY (FörfattareID) REFERENCES Författare(ID)
 );
 
--- Skapa vy v_TitlarPerFörfattare
+-- Skapa vy v_TitlarPerFörfattare för att visa författarens information
 CREATE VIEW v_TitlarPerFörfattare AS
 SELECT 
     CONCAT(F.Förnamn, ' ', F.Efternamn) AS Namn,
     DATEDIFF(YEAR, F.Födelsedatum, GETDATE()) AS Ålder,
-    COUNT(DISTINCT B.Titel) AS Titlar,
+    COUNT(DISTINCT B.Titel) AS AntalTitlar,
     SUM(B.Pris * LS.Antal) AS Lagervärde
 FROM Författare F
 JOIN BokFörfattare BF ON F.ID = BF.FörfattareID
@@ -83,7 +83,7 @@ JOIN Böcker B ON BF.BokISBN = B.ISBN13
 JOIN LagerSaldo LS ON B.ISBN13 = LS.ISBN
 GROUP BY F.ID, F.Förnamn, F.Efternamn, F.Födelsedatum;
 
--- Skapa lagrad procedur usp_FlyttaBok
+-- Skapa lagrad procedur usp_FlyttaBok för att flytta böcker mellan butiker
 CREATE PROCEDURE usp_FlyttaBok
   @FrånButikID INT,
   @TillButikID INT,
@@ -91,12 +91,21 @@ CREATE PROCEDURE usp_FlyttaBok
   @Antal INT = 1
 AS
 BEGIN
-  IF @Antal > (SELECT Antal FROM LagerSaldo WHERE ButikID = @FrånButikID AND ISBN = @ISBN)
+  -- Validera att antalet böcker som ska flyttas är positivt
+  IF @Antal <= 0
   BEGIN
-    RAISEERROR ('Det finns inte tillräckligt med böcker i den ursprungliga butiken.', 16, 1);
+    RAISERROR ('Antalet böcker som ska flyttas måste vara ett positivt heltal.', 16, 1);
     RETURN;
   END;
 
+  -- Validera att det finns tillräckligt med böcker i den ursprungliga butiken
+  IF @Antal > (SELECT Antal FROM LagerSaldo WHERE ButikID = @FrånButikID AND ISBN = @ISBN)
+  BEGIN
+    RAISERROR ('Det finns inte tillräckligt med böcker i den ursprungliga butiken.', 16, 1);
+    RETURN;
+  END;
+
+  -- Uppdatera LagerSaldo för att flytta böckerna mellan butikerna
   UPDATE LagerSaldo
   SET Antal = Antal - @Antal
   WHERE ButikID = @FrånButikID AND ISBN = @ISBN;
@@ -105,6 +114,7 @@ BEGIN
   SET Antal = Antal + @Antal
   WHERE ButikID = @TillButikID AND ISBN = @ISBN;
 
+  -- Avsluta transaktionen
   COMMIT;
 END;
 
@@ -164,16 +174,18 @@ VALUES ('9781234567890', 1),
        ('9783456789012', 3),
        ('9784567890123', 4);
 
--- Ytterligare vyexempel
+-- Ytterligare vyexempel för att visa försäljning per butik
 CREATE VIEW v_BokFörsäljningPerButik AS
 SELECT
     S.Butiksnamn,
     B.Titel,
+    B.Pris,
+    LS.Antal AS SåldaAntal,
     SUM(B.Pris * LS.Antal) AS TotalFörsäljning
 FROM Butiker S
 JOIN LagerSaldo LS ON S.ID = LS.ButikID
 JOIN Böcker B ON LS.ISBN = B.ISBN13
-GROUP BY S.Butiksnamn, B.Titel;
+GROUP BY S.Butiksnamn, B.Titel, B.Pris, LS.Antal;
 
 -- Ytterligare frågor för testning
 SELECT * FROM Författare;
@@ -187,5 +199,5 @@ SELECT * FROM BokFörfattare;
 SELECT * FROM v_TitlarPerFörfattare;
 SELECT * FROM v_BokFörsäljningPerButik;
 
--- Exekvera stored procedure usp_FlyttaBok
+-- Exekvera stored procedure usp_FlyttaBok för att flytta böcker mellan butiker
 EXEC usp_FlyttaBok @FrånButikID = 1, @TillButikID = 2, @ISBN = '9781234567890', @Antal = 3;
